@@ -1,0 +1,31 @@
+[project]
+name = "diffusion-image-viewer"
+version = "0.1.0"
+description = "dMRI viewer with orthogonal views, FFT, and review logging"
+authors = [
+    { name = "Your Name" }
+]
+readme = "README.md"
+requires-python = ">=3.9"
+
+dependencies = [
+    "numpy>=1.23",
+    "matplotlib>=3.7",
+    "nibabel>=5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "ruff"
+]
+
+docs = [
+    "mkdocs",
+    "mkdocs-material"
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
