@@ -31,9 +31,17 @@
 *.sql
 *.sqlite
 
+
 # Python
 §####################
 __pycache__/
+/__pycache__/
+*__pycache__*
+__*pycache__*
+.pytest_cache/
+.pytest/
+*.pytest_cache*
+*._cache_*
 *.py[cod]
 *.egg-info/
 build/
@@ -49,6 +57,9 @@ history/
 /history/
 .history/
 /.history/
+*.pytest_mpl_cache
+/.mypy_cache/
+
 
 # OS generated files #
 ######################

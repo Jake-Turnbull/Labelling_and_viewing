@@ -3,19 +3,11 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import List, Sequence, Tuple, Union
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Button, CheckButtons, Slider, TextBox
-
-try:
-    import nibabel as nib
-except ImportError as e:  # pragma: no cover
-    raise ImportError(
-        "This script requires nibabel. Install it with: pip install nibabel"
-    ) from e
+from matplotlib.widgets import Button, CheckButtons, Slider
 
 
 ArrayLike4D = np.ndarray
@@ -27,11 +19,6 @@ InputType = Union[ArrayLike4D, PathLike, Sequence[PathLike]]
 class SubjectInfo:
     path: str
     name: str
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-
 
 def _folder_label(path: str) -> str:
     label = os.path.basename(os.path.normpath(path))
@@ -80,6 +67,13 @@ def collect_subjects(root_dirs: Sequence[PathLike]) -> List[SubjectInfo]:
 
 
 def load_subject_nifti(subj_path: str) -> np.ndarray:
+    try:
+        import nibabel as nib
+    except ImportError as e:  # pragma: no cover
+        raise ImportError(
+            "This script requires nibabel to load NIfTI files. Install it with: pip install nibabel"
+        ) from e
+
     f1 = os.path.join(subj_path, "dMRI", "raw", "AP.nii")
     f2 = os.path.join(subj_path, "dMRI", "raw", "AP.nii.gz")
 
@@ -146,15 +140,15 @@ def _radial_power_spectrum(power2d: np.ndarray, nbins: int | None = None) -> Tup
 class DiffusionImageViewer:
     def __init__(self, dwi_or_dir: InputType):
         self.subjects: List[SubjectInfo] = []
-        self.current_subject_idx = 0
+        self.current_subject_idx = -1
         self.dwi: np.ndarray | None = None
         self.root_dirs: List[str] = []
         self.review_log_path: str | None = None
         self._suppress_subject_callback = False
         self._updating_controls = False
 
-        self.vol = 46
-        self.axial_slice = 50
+        self.vol = 1
+        self.axial_slice = 0
         self.sagittal_slice = 0
         self.coronal_slice = 0
 
@@ -180,15 +174,12 @@ class DiffusionImageViewer:
         self.sagittal_slider = None
         self.coronal_slider = None
         self.window_check = None
-        self.root_box = None
-        self.browse_button = None
-        self.load_button = None
         self.good_button = None
         self.bad_button = None
 
         self._init_input(dwi_or_dir)
         self._build_ui()
-        self._load_subject(0, log_view=True)
+        self._load_subject(0)
 
     def _init_input(self, dwi_or_dir: InputType) -> None:
         if isinstance(dwi_or_dir, np.ndarray):
@@ -199,6 +190,7 @@ class DiffusionImageViewer:
             self.subjects = [SubjectInfo(path="<array input>", name="array_input")]
             self.review_log_path = self._default_review_log_path()
             self._ensure_review_log_file()
+            self._normalize_review_log_file()
             return
 
         if isinstance(dwi_or_dir, (str, os.PathLike)):
@@ -210,6 +202,7 @@ class DiffusionImageViewer:
         self.dwi = load_subject_nifti(self.subjects[0].path)
         self.review_log_path = self._default_review_log_path()
         self._ensure_review_log_file()
+        self._normalize_review_log_file()
 
     def _default_review_log_path(self) -> str:
         if self.root_dirs:
@@ -225,20 +218,92 @@ class DiffusionImageViewer:
             with open(self.review_log_path, "w", encoding="utf-8"):
                 pass
 
-    def _append_review_event(self, event: str, subject: SubjectInfo, volume: int | None = None) -> None:
+    def _normalize_review_log_file(self) -> None:
         assert self.review_log_path is not None
-        payload = {
-            "timestamp": _utc_now_iso(),
-            "event": event,
-            "subject_index": self.current_subject_idx + 1,
-            "subject_id": subject.name,
-            "subject_path": subject.path,
-        }
-        if volume is not None:
-            payload["volume"] = int(volume)
+        records: dict[str, list[int]] = {}
 
-        with open(self.review_log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload) + "\n")
+        with open(self.review_log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if not isinstance(payload, dict):
+                    continue
+
+                subject_id = payload.get("subject_id")
+                if not isinstance(subject_id, str) or not subject_id:
+                    continue
+
+                if payload.get("event") not in {None, "bad"}:
+                    continue
+
+                raw_volume = payload.get("volume")
+                if raw_volume is None:
+                    continue
+
+                raw_values = raw_volume if isinstance(raw_volume, list) else [raw_volume]
+                subject_volumes = records.setdefault(subject_id, [])
+                for raw_value in raw_values:
+                    try:
+                        volume = int(raw_value)
+                    except (TypeError, ValueError):
+                        continue
+                    if volume not in subject_volumes:
+                        subject_volumes.append(volume)
+
+        self._write_review_log(records)
+
+    def _write_review_log(self, records: dict[str, list[int]]) -> None:
+        assert self.review_log_path is not None
+        with open(self.review_log_path, "w", encoding="utf-8") as f:
+            for subject_id, volumes in records.items():
+                payload = {
+                    "subject_id": subject_id,
+                    "volume": sorted(int(v) for v in volumes),
+                }
+                f.write(json.dumps(payload) + "\n")
+
+    def _record_bad_volume(self, subject: SubjectInfo, volume: int) -> None:
+        assert self.review_log_path is not None
+        records: dict[str, list[int]] = {}
+
+        with open(self.review_log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+
+                subject_id = payload.get("subject_id")
+                raw_volume = payload.get("volume")
+                if not isinstance(subject_id, str) or raw_volume is None:
+                    continue
+
+                raw_values = raw_volume if isinstance(raw_volume, list) else [raw_volume]
+                subject_volumes = records.setdefault(subject_id, [])
+                for raw_value in raw_values:
+                    try:
+                        parsed_volume = int(raw_value)
+                    except (TypeError, ValueError):
+                        continue
+                    if parsed_volume not in subject_volumes:
+                        subject_volumes.append(parsed_volume)
+
+        subject_volumes = records.setdefault(subject.name, [])
+        if volume not in subject_volumes:
+            subject_volumes.append(int(volume))
+
+        self._write_review_log(records)
 
     def _build_ui(self) -> None:
         self.fig = plt.figure(figsize=(18, 11))
@@ -248,7 +313,7 @@ class DiffusionImageViewer:
             pass
 
         gs = self.fig.add_gridspec(
-            2, 3, left=0.03, right=0.98, top=0.94, bottom=0.24, wspace=0.18, hspace=0.25
+            2, 3, left=0.03, right=0.98, top=0.94, bottom=0.20, wspace=0.18, hspace=0.25
         )
 
         self.ax_axial = self.fig.add_subplot(gs[0, 0])
@@ -303,39 +368,33 @@ class DiffusionImageViewer:
         self.fig.canvas.mpl_connect("key_press_event", self._on_key_press)
 
     def _build_controls(self) -> None:
-        self.root_box = TextBox(
-            self.fig.add_axes([0.05, 0.14, 0.28, 0.035]),
-            "Root dir",
-            initial=self.root_dirs[0] if self.root_dirs else "",
-        )
-        self.browse_button = Button(self.fig.add_axes([0.34, 0.14, 0.06, 0.035]), "Browse")
-        self.load_button = Button(self.fig.add_axes([0.41, 0.14, 0.05, 0.035]), "Load")
-        self.window_check = CheckButtons(self.fig.add_axes([0.47, 0.125, 0.08, 0.06]), ["Window"], [True])
+        self.window_check = CheckButtons(self.fig.add_axes([0.05, 0.07, 0.11, 0.07]), ["Window"], [True])
 
         subject_max = max(1, len(self.subjects))
         self.subject_slider = Slider(
-            self.fig.add_axes([0.57, 0.14, 0.22, 0.035]),
+            self.fig.add_axes([0.20, 0.12, 0.30, 0.025]),
             "Subject",
             1,
             subject_max,
             valinit=1,
             valstep=1,
         )
-        self.good_button = Button(self.fig.add_axes([0.82, 0.14, 0.07, 0.035]), "Good")
-        self.bad_button = Button(self.fig.add_axes([0.90, 0.14, 0.07, 0.035]), "Bad")
+        self.good_button = Button(self.fig.add_axes([0.53, 0.105, 0.09, 0.04]), "Good")
+        self.bad_button = Button(self.fig.add_axes([0.64, 0.105, 0.09, 0.04]), "Bad")
 
-        self.vol_slider = Slider(self.fig.add_axes([0.05, 0.07, 0.20, 0.03]), "Volume", 1, 2, valinit=1, valstep=1)
-        self.axial_slider = Slider(self.fig.add_axes([0.29, 0.07, 0.20, 0.03]), "Axial", 1, 2, valinit=1, valstep=1)
-        self.sagittal_slider = Slider(self.fig.add_axes([0.53, 0.07, 0.20, 0.03]), "Sagittal", 1, 2, valinit=1, valstep=1)
-        self.coronal_slider = Slider(self.fig.add_axes([0.77, 0.07, 0.20, 0.03]), "Coronal", 1, 2, valinit=1, valstep=1)
+        self.vol_slider = Slider(self.fig.add_axes([0.20, 0.07, 0.30, 0.025]), "Volume", 1, 2, valinit=1, valstep=1)
+        slider_x = 0.58
+        slider_w = 0.28
+        slider_h = 0.018
+        self.axial_slider = Slider(self.fig.add_axes([slider_x, 0.070, slider_w, slider_h]), "Axial", 1, 2, valinit=1, valstep=1)
+        self.sagittal_slider = Slider(self.fig.add_axes([slider_x, 0.045, slider_w, slider_h]), "Sagittal", 1, 2, valinit=1, valstep=1)
+        self.coronal_slider = Slider(self.fig.add_axes([slider_x, 0.020, slider_w, slider_h]), "Coronal", 1, 2, valinit=1, valstep=1)
 
         self.subject_slider.on_changed(self._on_subject_slider)
         self.vol_slider.on_changed(self._on_volume_slider)
         self.axial_slider.on_changed(self._on_axial_slider)
         self.sagittal_slider.on_changed(self._on_sagittal_slider)
         self.coronal_slider.on_changed(self._on_coronal_slider)
-        self.browse_button.on_clicked(self._browse_dir)
-        self.load_button.on_clicked(self._load_dir)
         self.good_button.on_clicked(lambda _evt: self._review_and_advance("good"))
         self.bad_button.on_clicked(lambda _evt: self._review_and_advance("bad"))
         self.window_check.on_clicked(lambda _label: self.update_display())
@@ -343,19 +402,15 @@ class DiffusionImageViewer:
     def _current_subject(self) -> SubjectInfo:
         return self.subjects[self.current_subject_idx]
 
-    def _load_subject(self, idx: int, *, log_view: bool = True) -> None:
+    def _load_subject(self, idx: int) -> None:
         idx = int(np.clip(idx, 0, len(self.subjects) - 1))
         if idx == self.current_subject_idx and self.dwi is not None:
-            if log_view:
-                self._append_review_event("view", self._current_subject())
             self.update_display()
             return
 
         self.current_subject_idx = idx
         subj = self._current_subject()
         self.dwi = load_subject_nifti(subj.path)
-        if log_view:
-            self._append_review_event("view", subj)
 
         nx, ny, nz, nv = self.dwi.shape
         self.sagittal_slice = int(np.clip(self.sagittal_slice if self.sagittal_slice else nx // 2, 1, nx))
@@ -391,49 +446,13 @@ class DiffusionImageViewer:
         slider.valstep = 1
         slider.set_val(int(np.clip(value, vmin, vmax)))
 
-    def _browse_dir(self, _event) -> None:
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-        except ImportError:
-            print("tkinter is not available in this Python install.")
+    def _advance_volume(self) -> None:
+        if self.dwi is None:
             return
 
-        root = tk.Tk()
-        root.withdraw()
-        root.update()
-        new_dir = filedialog.askdirectory(
-            initialdir=self.root_box.text or os.getcwd(),
-            title="Choose a root folder",
-        )
-        root.destroy()
-
-        if not new_dir:
-            return
-
-        self.root_box.set_val(new_dir)
-        self._load_dir(None)
-
-    def _load_dir(self, _event) -> None:
-        new_root = os.path.expanduser(self.root_box.text.strip())
-        if not new_root or not os.path.isdir(new_root):
-            print(f"Not a valid folder: {new_root}")
-            return
-
-        try:
-            self.subjects = collect_subjects([new_root])
-        except Exception as e:
-            print(str(e))
-            return
-
-        self.root_dirs = [new_root]
-        self.review_log_path = self._default_review_log_path()
-        self._ensure_review_log_file()
-
-        self.current_subject_idx = 0
-        self.dwi = load_subject_nifti(self.subjects[0].path)
-        self._append_review_event("view", self._current_subject())
-        self._sync_controls_to_current_volume()
+        nv = self.dwi.shape[-1]
+        if self.vol < nv:
+            self.vol += 1
         self.update_display()
 
     def _on_subject_slider(self, value: float) -> None:
@@ -443,7 +462,7 @@ class DiffusionImageViewer:
         idx = int(np.clip(idx, 0, len(self.subjects) - 1))
         if idx == self.current_subject_idx:
             return
-        self._load_subject(idx, log_view=True)
+        self._load_subject(idx)
 
     def _on_volume_slider(self, value: float) -> None:
         if self._updating_controls:
@@ -475,12 +494,8 @@ class DiffusionImageViewer:
 
         subj = self._current_subject()
         if decision == "bad":
-            self._append_review_event("bad", subj, volume=self.vol)
-        else:
-            self._append_review_event("good", subj)
-
-        next_idx = (self.current_subject_idx + 1) % len(self.subjects)
-        self._load_subject(next_idx, log_view=True)
+            self._record_bad_volume(subj, self.vol)
+        self._advance_volume()
 
     def _on_key_press(self, event) -> None:
         if event.key in {"g", "G"}:
@@ -488,9 +503,9 @@ class DiffusionImageViewer:
         elif event.key in {"b", "B"}:
             self._review_and_advance("bad")
         elif event.key in {"right", "d"}:
-            self._load_subject((self.current_subject_idx + 1) % len(self.subjects), log_view=True)
+            self._load_subject((self.current_subject_idx + 1) % len(self.subjects))
         elif event.key in {"left", "a"}:
-            self._load_subject((self.current_subject_idx - 1) % len(self.subjects), log_view=True)
+            self._load_subject((self.current_subject_idx - 1) % len(self.subjects))
 
     def update_display(self) -> None:
         if self.dwi is None:
@@ -606,10 +621,11 @@ class DiffusionImageViewer:
         self.fig.canvas.draw_idle()
 
 
-def diffusion_image_viewer(dwi_or_dir: InputType) -> DiffusionImageViewer:
+def diffusion_image_viewer(dwi_or_dir: InputType, *, show: bool = True) -> DiffusionImageViewer:
     """MATLAB-style entry point."""
     viewer = DiffusionImageViewer(dwi_or_dir)
-    plt.show()
+    if show:
+        plt.show()
     return viewer
 
 
