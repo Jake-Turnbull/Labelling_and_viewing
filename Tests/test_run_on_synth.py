@@ -97,3 +97,180 @@ def test_existing_log_is_normalized_and_slice_sliders_are_stacked(tmp_path: Path
         assert axial_pos.width < vol_pos.width
     finally:
         plt.close(viewer.fig)
+
+
+def test_subject_id_filtering(tmp_path: Path, fake_nifti_loader):
+    """Only subjects matching subject_ids should be loaded."""
+    root_dir = tmp_path / "dataset"
+    _make_subject(root_dir, "sub-01")
+    _make_subject(root_dir, "sub-02")
+    _make_subject(root_dir, "sub-03")
+
+    viewer = Image_label_and_view.diffusion_image_viewer(
+        root_dir, subject_ids=["sub-01", "sub-03"], show=False
+    )
+    try:
+        names = [s.name for s in viewer.subjects]
+        assert names == ["sub-01", "sub-03"]
+        assert len(viewer.subjects) == 2
+    finally:
+        plt.close(viewer.fig)
+
+
+def test_subject_id_filtering_unknown_ids_raises(tmp_path: Path):
+    """Requesting subject IDs that don't exist should raise FileNotFoundError."""
+    root_dir = tmp_path / "dataset"
+    _make_subject(root_dir, "sub-01")
+    with pytest.raises(FileNotFoundError):
+        Image_label_and_view.collect_subjects([root_dir], subject_ids=["sub-99"])
+
+
+def test_max_subjects_fallback(tmp_path: Path, fake_nifti_loader):
+    """max_subjects caps scanning when no subject_ids are provided."""
+    root_dir = tmp_path / "dataset"
+    for i in range(1, 6):
+        _make_subject(root_dir, f"sub-0{i}")
+
+    viewer = Image_label_and_view.diffusion_image_viewer(
+        root_dir, max_subjects=3, show=False
+    )
+    try:
+        assert len(viewer.subjects) == 3
+        # Subjects are scanned in alphabetical order; first 3 should be loaded.
+        assert [s.name for s in viewer.subjects] == ["sub-01", "sub-02", "sub-03"]
+    finally:
+        plt.close(viewer.fig)
+
+
+def test_max_subjects_ignored_when_subject_ids_given(tmp_path: Path, fake_nifti_loader):
+    """max_subjects is ignored when subject_ids is specified explicitly."""
+    root_dir = tmp_path / "dataset"
+    for i in range(1, 6):
+        _make_subject(root_dir, f"sub-0{i}")
+
+    # Explicitly request 4 subjects; max_subjects=2 must be ignored.
+    subjects = Image_label_and_view.collect_subjects(
+        [root_dir],
+        subject_ids=["sub-01", "sub-02", "sub-03", "sub-04"],
+        max_subjects=2,
+    )
+    assert len(subjects) == 4
+
+
+def test_five_consecutive_good_votes_advance_subject(tmp_path: Path, fake_nifti_loader):
+    """After _GOOD_STREAK_THRESHOLD consecutive good votes the viewer advances to
+    the next subject and resets the streak counter."""
+    root_dir = tmp_path / "dataset"
+    _make_dataset(root_dir)  # sub-01 and sub-02
+
+    viewer = Image_label_and_view.diffusion_image_viewer(root_dir, show=False)
+    try:
+        assert viewer.current_subject_idx == 0
+
+        threshold = Image_label_and_view._GOOD_STREAK_THRESHOLD
+        # Vote good (threshold - 1) times: should stay on the same subject.
+        for _ in range(threshold - 1):
+            viewer._review_and_advance("good")
+        assert viewer.current_subject_idx == 0
+        assert viewer._consecutive_good_count == threshold - 1
+
+        # One more good vote reaches the threshold: subject advances.
+        viewer._review_and_advance("good")
+        assert viewer.current_subject_idx == 1
+        assert viewer._consecutive_good_count == 0
+    finally:
+        plt.close(viewer.fig)
+
+
+def test_bad_vote_resets_good_streak(tmp_path: Path, fake_nifti_loader):
+    """A bad vote resets the consecutive-good counter."""
+    root_dir = tmp_path / "dataset"
+    _make_dataset(root_dir)
+
+    viewer = Image_label_and_view.diffusion_image_viewer(root_dir, show=False)
+    try:
+        for _ in range(3):
+            viewer._review_and_advance("good")
+        assert viewer._consecutive_good_count == 3
+
+        viewer._review_and_advance("bad")
+        assert viewer._consecutive_good_count == 0
+
+        # Streak starts fresh after the bad vote.
+        viewer._review_and_advance("good")
+        assert viewer._consecutive_good_count == 1
+        assert viewer.current_subject_idx == 0
+    finally:
+        plt.close(viewer.fig)
+
+
+def test_good_streak_resets_on_manual_subject_change(tmp_path: Path, fake_nifti_loader):
+    """Manually switching subjects via the keyboard resets the good streak."""
+    root_dir = tmp_path / "dataset"
+    _make_dataset(root_dir)
+
+    viewer = Image_label_and_view.diffusion_image_viewer(root_dir, show=False)
+    try:
+        for _ in range(3):
+            viewer._review_and_advance("good")
+        assert viewer._consecutive_good_count == 3
+
+        viewer._load_subject(1)
+        assert viewer._consecutive_good_count == 0
+    finally:
+        plt.close(viewer.fig)
+
+
+def test_fixed_wl_check_exists_and_defaults_to_off(tmp_path: Path, fake_nifti_loader):
+    """The Fix WL checkbox is present and defaults to the off (auto) state."""
+    root_dir = tmp_path / "dataset"
+    _make_dataset(root_dir)
+
+    viewer = Image_label_and_view.diffusion_image_viewer(root_dir, show=False)
+    try:
+        assert viewer.fixed_wl_check is not None
+        assert viewer._fixed_wl_on() is False
+    finally:
+        plt.close(viewer.fig)
+
+
+def test_raw_min_max_boxes_initialized_to_data_range(tmp_path: Path, fake_nifti_loader):
+    """After loading, _raw_min_val/_raw_max_val and the text boxes reflect the full data range."""
+    root_dir = tmp_path / "dataset"
+    _make_dataset(root_dir)
+
+    viewer = Image_label_and_view.diffusion_image_viewer(root_dir, show=False)
+    try:
+        # The fake data is np.arange(6*7*8*4), so min=0, max=6*7*8*4-1=1343.
+        assert viewer.raw_min_box is not None
+        assert viewer.raw_max_box is not None
+        assert viewer._raw_min_val == pytest.approx(0.0)
+        assert viewer._raw_max_val == pytest.approx(6 * 7 * 8 * 4 - 1)
+        assert float(viewer.raw_min_box.text) == pytest.approx(0.0)
+        assert float(viewer.raw_max_box.text) == pytest.approx(6 * 7 * 8 * 4 - 1)
+    finally:
+        plt.close(viewer.fig)
+
+
+def test_fixed_wl_applies_textbox_clim(tmp_path: Path, fake_nifti_loader):
+    """When Fix WL is active, all orthogonal views use the values from the text boxes."""
+    root_dir = tmp_path / "dataset"
+    _make_dataset(root_dir)
+
+    viewer = Image_label_and_view.diffusion_image_viewer(root_dir, show=False)
+    try:
+        # Enable Fix WL by toggling the checkbox.
+        viewer.fixed_wl_check.set_active(0)
+        assert viewer._fixed_wl_on() is True
+
+        # Set specific values directly (simulates the user typing and pressing Enter).
+        viewer._raw_min_val = 100.0
+        viewer._raw_max_val = 500.0
+        viewer.update_display()
+
+        for im in (viewer.im_axial, viewer.im_sagittal, viewer.im_coronal):
+            clim = im.get_clim()
+            assert clim[0] == pytest.approx(100.0)
+            assert clim[1] == pytest.approx(500.0)
+    finally:
+        plt.close(viewer.fig)
