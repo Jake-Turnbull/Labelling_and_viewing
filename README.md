@@ -1,7 +1,5 @@
 # Diffusion image viewer and labeller
 
-[![DOI](https://zenodo.org/badge/1016745071.svg)](https://doi.org/10.5281/zenodo.19595960)
-
 
 This is a set of scripts for viewing and recording bad volumes in diffusion MRI data. AI has been used to convert and extend much of this code from the original MATLAB versions which are stored on the FMRIB compute cluster into Python. The AI used for this was ChatGPT (specifically, GPT 5 mini for conversion).
 
