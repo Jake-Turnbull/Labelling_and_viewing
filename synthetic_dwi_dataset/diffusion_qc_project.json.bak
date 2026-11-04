@@ -1,0 +1,90 @@
+{
+  "progress": {
+    "current_rank": 24,
+    "current_subject": "sub-01"
+  },
+  "schema_version": 1,
+  "settings": {
+    "good_threshold": 2,
+    "ranking_csv": "/Users/jacob.turnbull/VS_code_projects/UKB_Eddy/Labelling_and_viewing/synthetic_dwi_dataset/synthetic_volume_ranking.csv",
+    "results_dir": "/Users/jacob.turnbull/VS_code_projects/UKB_Eddy/Labelling_and_viewing/synthetic_dwi_dataset",
+    "subject_csv": "/Users/jacob.turnbull/VS_code_projects/UKB_Eddy/Labelling_and_viewing/synthetic_dwi_dataset/synthetic_subjects.csv",
+    "subject_root": "/Users/jacob.turnbull/VS_code_projects/UKB_Eddy/Labelling_and_viewing/synthetic_dwi_dataset",
+    "volume_index_base": 0
+  },
+  "subjects": {
+    "sub-01": {
+      "acquisition": {
+        "month": 1,
+        "scan_date_raw": 2022.041667,
+        "year": 2022
+      },
+      "bad_volumes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        27,
+        46,
+        48,
+        69,
+        79,
+        86,
+        92,
+        94,
+        98
+      ],
+      "good_volumes": [
+        60
+      ],
+      "loading_error": null,
+      "notes": "",
+      "original_group": "HIGH",
+      "original_ylin": 0.075,
+      "skipped_volumes": [],
+      "status": "in_progress",
+      "uncertain_volumes": []
+    },
+    "sub-02": {
+      "acquisition": {
+        "month": 2,
+        "scan_date_raw": 2022.125,
+        "year": 2022
+      },
+      "bad_volumes": [],
+      "good_volumes": [],
+      "loading_error": null,
+      "notes": "",
+      "original_group": "LOW",
+      "original_ylin": 0.11,
+      "skipped_volumes": [],
+      "status": "pending",
+      "uncertain_volumes": []
+    },
+    "sub-03": {
+      "acquisition": {
+        "month": 3,
+        "scan_date_raw": 2022.208333,
+        "year": 2022
+      },
+      "bad_volumes": [],
+      "good_volumes": [],
+      "loading_error": null,
+      "notes": "",
+      "original_group": "HIGH",
+      "original_ylin": 0.145,
+      "skipped_volumes": [],
+      "status": "pending",
+      "uncertain_volumes": []
+    }
+  }
+}

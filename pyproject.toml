@@ -14,6 +14,12 @@ dependencies = [
     "nibabel>=5.0",
 ]
 
+[project.entry-points.fsleyes_controls]
+"Diffusion QC" = "fsleyes_diffusion_qc.panel:DiffusionQCPanel"
+
+[project.scripts]
+diffusion-qc-generate-synthetic = "fsleyes_diffusion_qc.synthetic:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",
@@ -31,7 +37,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["ViewerScripts*"]
+include = ["ViewerScripts*", "fsleyes_diffusion_qc*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

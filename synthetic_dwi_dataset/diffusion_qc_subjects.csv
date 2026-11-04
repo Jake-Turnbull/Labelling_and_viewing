@@ -1,0 +1,4 @@
+SubjectID,Year,Month,Group,Ylin,GoodVolumes,BadVolumes,UncertainVolumes,UninspectedVolumes,FinalQCStatus,PassedScreeningRule
+sub-01,2022,1,HIGH,0.075,0,0,0,105,loading_error,No
+sub-02,2022,2,LOW,0.11,0,0,0,105,pending,No
+sub-03,2022,3,HIGH,0.145,0,0,0,105,pending,No
