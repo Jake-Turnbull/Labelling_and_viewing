@@ -70,3 +70,16 @@ history/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+
+# All non-viewer files 
+######################
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
+*.gif
+
+ViewerScripts/
+Tests/
